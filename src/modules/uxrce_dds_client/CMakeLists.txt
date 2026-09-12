@@ -52,6 +52,12 @@ else()
 	get_property(include_dirs DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES)
 	set(c_flags_with_includes "${CMAKE_C_FLAGS}")
 	set(cxx_flags_with_includes "${CMAKE_CXX_FLAGS}")
+	# The external Micro-XRCE-DDS build does not inherit PX4's normal target include paths,
+	# so add the PX4 source roots explicitly for headers like <drivers/drv_hrt.h>.
+	list(APPEND include_dirs
+		${PX4_SOURCE_DIR}/src
+		${PX4_SOURCE_DIR}/platforms/common/include
+	)
 	foreach(dir ${include_dirs})
 		set(c_flags_with_includes "${c_flags_with_includes} -I${dir}")
 		set(cxx_flags_with_includes "${cxx_flags_with_includes} -I${dir}")
