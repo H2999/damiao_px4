@@ -108,6 +108,10 @@ MulticopterRateControl::Run()
 		return;
 	}
 
+	//查看一段代码的耗时
+	// perf_begin(_loop_perf);   // 开始计时
+	// ... 这里是要测量的代码 ...
+	// perf_end(_loop_perf);     // 结束计时
 	perf_begin(_loop_perf);
 
 	// Check if parameters have changed
@@ -151,6 +155,7 @@ MulticopterRateControl::Run()
 		// use rates setpoint topic
 		vehicle_rates_setpoint_s vehicle_rates_setpoint{};
 
+		//Acro 模式
 		if (_vehicle_control_mode.flag_control_manual_enabled && !_vehicle_control_mode.flag_control_attitude_enabled) {
 			// generate the rate setpoint from sticks
 			manual_control_setpoint_s manual_control_setpoint;
@@ -176,7 +181,9 @@ MulticopterRateControl::Run()
 				_vehicle_rates_setpoint_pub.publish(vehicle_rates_setpoint);
 			}
 
-		} else if (_vehicle_rates_setpoint_sub.update(&vehicle_rates_setpoint)) {
+		}
+		//其他模式
+		else if (_vehicle_rates_setpoint_sub.update(&vehicle_rates_setpoint)) {
 			if (_vehicle_rates_setpoint_sub.copy(&vehicle_rates_setpoint)) {
 				_rates_setpoint(0) = PX4_ISFINITE(vehicle_rates_setpoint.roll)  ? vehicle_rates_setpoint.roll  : rates(0);
 				_rates_setpoint(1) = PX4_ISFINITE(vehicle_rates_setpoint.pitch) ? vehicle_rates_setpoint.pitch : rates(1);
@@ -189,6 +196,7 @@ MulticopterRateControl::Run()
 		if (_vehicle_control_mode.flag_control_rates_enabled) {
 
 			// reset integral if disarmed
+			//未解锁或非旋转翼时，重置积分
 			if (!_vehicle_control_mode.flag_armed || _vehicle_status.vehicle_type != vehicle_status_s::VEHICLE_TYPE_ROTARY_WING) {
 				_rate_control.resetIntegral();
 			}
@@ -196,6 +204,11 @@ MulticopterRateControl::Run()
 			// update saturation status from control allocation feedback
 			control_allocator_status_s control_allocator_status;
 
+			//更新饱和状态
+			// 速率控制器拿到饱和标志后做什么：
+			// 如果某个轴正方向饱和了，就停止该轴积分项的正向累加。
+			// 如果负方向饱和，就停止负向累加
+			// 这样积分项不会在已经饱和的方向上继续“白费力气”地累加。
 			if (_control_allocator_status_sub.update(&control_allocator_status)) {
 				Vector<bool, 3> saturation_positive;
 				Vector<bool, 3> saturation_negative;
@@ -220,6 +233,7 @@ MulticopterRateControl::Run()
 				_rate_control.update(rates, _rates_setpoint, angular_accel, dt, _maybe_landed || _landed);
 
 			// apply low-pass filtering on yaw axis to reduce high frequency torque caused by rotor acceleration
+			//偏航力矩低通滤波
 			torque_setpoint(2) = _output_lpf_yaw.update(torque_setpoint(2), dt);
 
 			// publish rate controller status

@@ -46,6 +46,9 @@ MulticopterPositionControl::MulticopterPositionControl(bool vtol) :
 	ScheduledWorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
 	_vehicle_attitude_setpoint_pub(vtol ? ORB_ID(mc_virtual_attitude_setpoint) : ORB_ID(vehicle_attitude_setpoint))
 {
+	// 这是采样间隔统计，统计的是相邻两次采样之间的时间差
+	// 也就是"从上次采样到现在过了多久"，即周期/频率
+	// 侧重"采样节奏稳不稳、实际频率是多少"，还能出方差
 	_sample_interval_s.update(0.01f); // 100 Hz default
 	parameters_update(true);
 	_tilt_limit_slew_rate.setSlewRate(.2f);
@@ -65,6 +68,7 @@ bool MulticopterPositionControl::init()
 	}
 
 	_time_stamp_last_loop = hrt_absolute_time();
+	//初始化立即启动一次 不必等到订阅回调触发
 	ScheduleNow();
 
 	return true;
@@ -307,6 +311,7 @@ void MulticopterPositionControl::parameters_update(bool force)
 	}
 }
 
+//对数据作处理 对速度 加速度作滤波
 PositionControlStates MulticopterPositionControl::set_vehicle_states(const vehicle_local_position_s
 		&vehicle_local_position, const float dt_s)
 {
@@ -384,10 +389,12 @@ void MulticopterPositionControl::Run()
 	}
 
 	// reschedule backup
+	// 每次 Run() 结束时，主动安排 100ms 后再执行一次 保证控制器始终在运行
 	ScheduleDelayed(100_ms);
 
 	parameters_update(false);
 
+	//性能计时（profiling），统计的是一段代码的执行耗时
 	perf_begin(_cycle_perf);
 	vehicle_local_position_s vehicle_local_position;
 
@@ -398,9 +405,10 @@ void MulticopterPositionControl::Run()
 
 		_sample_interval_s.update(dt);
 
+		//更新控制模式
 		if (_vehicle_control_mode_sub.updated()) {
 			const bool previous_position_control_enabled = _vehicle_control_mode.flag_multicopter_position_control_enabled;
-
+			//边沿检测
 			if (_vehicle_control_mode_sub.update(&_vehicle_control_mode)) {
 				if (!previous_position_control_enabled && _vehicle_control_mode.flag_multicopter_position_control_enabled) {
 					_time_position_control_enabled = _vehicle_control_mode.timestamp;
@@ -411,9 +419,9 @@ void MulticopterPositionControl::Run()
 				}
 			}
 		}
-
+		//更新着陆状态
 		_vehicle_land_detected_sub.update(&_vehicle_land_detected);
-
+		//悬停油门估计
 		if (_param_mpc_use_hte.get()) {
 			hover_thrust_estimate_s hte;
 
@@ -436,7 +444,7 @@ void MulticopterPositionControl::Run()
 		}
 
 		_trajectory_setpoint_sub.update(&_setpoint);
-
+		//防止 EKF 复位时位置估计突然跳变，导致控制器误以为误差突变而猛打舵——通过同步平移设定点来抵消这个跳变，保证控制平滑
 		adjustSetpointForEKFResets(vehicle_local_position, _setpoint);
 
 		if (_vehicle_control_mode.flag_multicopter_position_control_enabled) {
@@ -453,6 +461,7 @@ void MulticopterPositionControl::Run()
 		    && (_setpoint.timestamp >= _time_position_control_enabled)) {
 
 			// update vehicle constraints and handle smooth takeoff
+			// 更新约束
 			_vehicle_constraints_sub.update(&_vehicle_constraints);
 
 			// fix to prevent the takeoff ramp to ramp to a too high value or get stuck because of NAN
@@ -492,6 +501,7 @@ void MulticopterPositionControl::Run()
 
 			bool skip_takeoff = _param_com_throw_en.get();
 			// handle smooth takeoff
+			//
 			_takeoff.updateTakeoffState(_vehicle_control_mode.flag_armed, _vehicle_land_detected.landed,
 						    _vehicle_constraints.want_takeoff,
 						    _vehicle_constraints.speed_up, skip_takeoff, vehicle_local_position.timestamp_sample);
@@ -500,15 +510,21 @@ void MulticopterPositionControl::Run()
 			const bool flying                    = (_takeoff.getTakeoffState() >= TakeoffState::flight);
 			const bool flying_but_ground_contact = (flying && _vehicle_land_detected.ground_contact);
 
+			//在没飞的时候 给控制器一个合理的基准油门，避免它从 0 开始瞎积分
 			if (!flying) {
 				_control.setHoverThrust(_param_mpc_thr_hover.get());
 			}
-
+			//别让加速度前馈干扰起飞爬升。起飞爬升由专门的逻辑控制，不希望被外部的加速度前馈叠加进去，导致爬升不稳
 			// make sure takeoff ramp is not amended by acceleration feed-forward
 			if (_takeoff.getTakeoffState() == TakeoffState::rampup && PX4_ISFINITE(_setpoint.velocity[2])) {
 				_setpoint.acceleration[2] = NAN;
 			}
+			// 还没起飞，或在飞但还压在地上。
 
+			// 清空设定点：_setpoint 置空，即不使用任何外部目标。
+			// 给一个很大的向下加速度：(0, 0, 100)（NED 坐标，z 向下为正，100 表示强烈向下）。
+			// 注释说：确保没有推力——即让控制器输出往下压，飞机老实待在地上，别乱动
+			// 重置积分器：_control.resetIntegral()，防止积分饱和（windup）——如果不清，误差一直累积，等真起飞时会突然暴冲。
 			if (not_taken_off || flying_but_ground_contact) {
 				// we are not flying yet and need to avoid any corrections
 				_setpoint = PositionControl::empty_trajectory_setpoint;
@@ -520,6 +536,7 @@ void MulticopterPositionControl::Run()
 			}
 
 			// limit tilt during takeoff ramupup
+			//倾角设置
 			const float tilt_limit_deg = (_takeoff.getTakeoffState() < TakeoffState::flight)
 						     ? _param_mpc_tiltmax_lnd.get() : _param_mpc_tiltmax_air.get();
 			_control.setTiltLimit(_tilt_limit_slew_rate.update(math::radians(tilt_limit_deg), dt));

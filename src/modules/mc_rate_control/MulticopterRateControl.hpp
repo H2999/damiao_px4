@@ -87,7 +87,7 @@ private:
 	 * initialize some vectors/matrices from parameters
 	 */
 	void parameters_updated();
-
+	//根据当前计算出的力矩设定点，更新执行器控制状态，用于监控和记录控制器的输出情况
 	void updateActuatorControlsStatus(const vehicle_torque_setpoint_s &vehicle_torque_setpoint, float dt);
 
 	RateControl _rate_control; ///< class for rate control calculations
