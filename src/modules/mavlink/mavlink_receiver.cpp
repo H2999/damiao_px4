@@ -61,6 +61,10 @@
 #include "mavlink_main.h"
 #include "mavlink_receiver.h"
 
+#ifdef CONFIG_DRIVERS_SERIALPASSTHROUGH
+#include <drivers/serialpassthrough/serialpassthrough.hpp>
+#endif
+
 #include <lib/drivers/device/Device.hpp> // For DeviceId union
 #include <containers/LockGuard.hpp>
 
@@ -1850,6 +1854,25 @@ MavlinkReceiver::handle_message_serial_control(mavlink_message_t *msg)
 	     mavlink_system.compid != serial_control_mavlink.target_component)) {
 		return;
 	}
+
+#ifdef CONFIG_DRIVERS_SERIALPASSTHROUGH
+	if (!(serial_control_mavlink.flags & SERIAL_CONTROL_FLAG_REPLY) &&
+	    (serial_control_mavlink.device <= 5 ||
+	     (serial_control_mavlink.device >= 20 && serial_control_mavlink.device <= 27))) {
+		SerialPassthrough::startForDevice(serial_control_mavlink.device, serial_control_mavlink.baudrate);
+		SerialPassthrough *sp = SerialPassthrough::get_instance_for_device(serial_control_mavlink.device);
+
+		if (sp && serial_control_mavlink.count > 0) {
+			sp->pushFromMavlink(serial_control_mavlink.data,
+					    serial_control_mavlink.count,
+					    msg->sysid, msg->compid,
+					    serial_control_mavlink.device,
+					    (uint8_t)_mavlink.get_channel());
+		}
+
+		return;
+	}
+#endif
 
 	// we only support shell commands
 	if (serial_control_mavlink.device != SERIAL_CONTROL_DEV_SHELL

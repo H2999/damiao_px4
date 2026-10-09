@@ -475,8 +475,14 @@ else
 	else
 		commander start
 
-		dshot start
-		pwm_out start
+		if param greater -s PASSTHRU_EN 0
+		then
+			# Leave ESC signal pins free for serial passthrough.
+			param set PASSTHRU_EN 0
+		else
+			dshot start
+			pwm_out start
+		fi
 	fi
 
 	#

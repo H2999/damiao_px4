@@ -132,6 +132,7 @@ px4_add_module(
 		drivers_accelerometer
 		drivers_gyroscope
 		drivers_magnetometer
+		drivers__serialpassthrough
 		conversion
 		sensor_calibration
 		geo

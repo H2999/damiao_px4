@@ -719,6 +719,7 @@ private:
 	void handleStatus();
 
 	void handleMavlinkShellOutput();
+	void handleSerialPassthroughOutput();
 
 	/**
 	 * Reconfigure a SiK radio if requested by MAV_SIK_RADIO_ID
