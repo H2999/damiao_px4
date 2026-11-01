@@ -70,6 +70,10 @@ EKF2::EKF2(bool multi_mode, const px4::wq_config_t &config, bool replay_mode):
 #if defined(CONFIG_EKF2_AUXVEL)
 	_param_ekf2_avel_delay(_params->ekf2_avel_delay),
 #endif // CONFIG_EKF2_AUXVEL
+	_param_ekf2_imp_en(_params->ekf2_imp_en),
+	_param_ekf2_imp_acc(_params->ekf2_imp_acc),
+	_param_ekf2_imp_rate(_params->ekf2_imp_rate),
+	_param_ekf2_imp_qmax(_params->ekf2_imp_qmax),
 	_param_ekf2_gyr_noise(_params->ekf2_gyr_noise),
 	_param_ekf2_acc_noise(_params->ekf2_acc_noise),
 	_param_ekf2_gyr_b_noise(_params->ekf2_gyr_b_noise),
@@ -624,6 +628,10 @@ void EKF2::Run()
 			imu_sample_new.delta_vel_dt = imu.delta_velocity_dt * 1.e-6f;
 			imu_sample_new.delta_vel = Vector3f{imu.delta_velocity};
 
+			for (unsigned i = 0; i < 3; ++i) {
+				imu_sample_new.delta_ang_clipping[i] = imu.delta_angle_clipping & (1 << i);
+			}
+
 			if (imu.delta_velocity_clipping > 0) {
 				imu_sample_new.delta_vel_clipping[0] = imu.delta_velocity_clipping & vehicle_imu_s::CLIPPING_X;
 				imu_sample_new.delta_vel_clipping[1] = imu.delta_velocity_clipping & vehicle_imu_s::CLIPPING_Y;
@@ -684,6 +692,10 @@ void EKF2::Run()
 			imu_sample_new.delta_ang = Vector3f{sensor_combined.gyro_rad} * imu_sample_new.delta_ang_dt;
 			imu_sample_new.delta_vel_dt = sensor_combined.accelerometer_integral_dt * 1.e-6f;
 			imu_sample_new.delta_vel = Vector3f{sensor_combined.accelerometer_m_s2} * imu_sample_new.delta_vel_dt;
+
+			for (unsigned i = 0; i < 3; ++i) {
+				imu_sample_new.delta_ang_clipping[i] = sensor_combined.gyro_clipping & (1 << i);
+			}
 
 			if (sensor_combined.accelerometer_clipping > 0) {
 				imu_sample_new.delta_vel_clipping[0] = sensor_combined.accelerometer_clipping & sensor_combined_s::CLIPPING_X;
@@ -817,6 +829,20 @@ void EKF2::Run()
 			PublishEventFlags(now);
 			PublishStatus(now);
 			PublishStatusFlags(now);
+
+			if (_param_ekf2_imp_en.get() && now - _last_impact_status >= 20000) {
+				estimator_impact_status_s status{};
+				status.timestamp = hrt_absolute_time();
+				status.timestamp_sample = _ekf.get_imu_sample_delayed().time_us;
+				status.accel_device_id = _device_id_accel;
+				status.gyro_device_id = _device_id_gyro;
+				status.event_count = _ekf.getImpactDetector().events();
+				status.state = static_cast<uint8_t>(_ekf.getImpactDetector().state());
+				status.enabled = true;
+				status.variance_scale = _ekf.getImpactVarianceScale();
+				_impact_status_pub.publish(status);
+				_last_impact_status = now;
+			}
 
 			if (_param_ekf2_log_verbose.get()) {
 				PublishAidSourceStatus(now);

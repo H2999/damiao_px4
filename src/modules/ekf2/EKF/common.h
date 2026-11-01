@@ -183,6 +183,7 @@ struct imuSample {
 	Vector3f    delta_vel{};              ///< delta velocity in body frame (integrated accelerometer measurements) (m/sec)
 	float       delta_ang_dt{};           ///< delta angle integration period (sec)
 	float       delta_vel_dt{};           ///< delta velocity integration period (sec)
+	bool        delta_ang_clipping[3] {}; ///< gyro clipping retained through IMU downsampling
 	bool        delta_vel_clipping[3] {}; ///< true (per axis) if this sample contained any accelerometer clipping
 };
 
@@ -284,6 +285,10 @@ struct parameters {
 	float ekf2_delay_max{110.f};            ///< maximum time delay of all the aiding sensors. Sets the size of the observation buffers. (mSec)
 
 	// input noise
+	int32_t ekf2_imp_en{0};               ///< experimental adaptive process noise, default off
+	float ekf2_imp_acc{35.f};             ///< specific force trigger (m/s^2)
+	float ekf2_imp_rate{30.f};            ///< angular rate norm trigger (rad/s)
+	float ekf2_imp_qmax{25.f};            ///< maximum nominal noise variance multiplier
 	float ekf2_gyr_noise{1.5e-2f};          ///< IMU angular rate noise used for covariance prediction (rad/sec)
 	float ekf2_acc_noise{3.5e-1f};          ///< IMU acceleration noise use for covariance prediction (m/sec**2)
 

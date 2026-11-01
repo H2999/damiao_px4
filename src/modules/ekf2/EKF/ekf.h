@@ -44,6 +44,7 @@
 #define EKF_EKF_H
 
 #include "estimator_interface.h"
+#include <lib/collision_recovery/ImpactDetector.hpp>
 
 #if defined(CONFIG_EKF2_GNSS)
 # include "aid_sources/gnss/gnss_checks.hpp"
@@ -270,6 +271,8 @@ public:
 	const Vector3f &getGyroBias() const { return _state.gyro_bias; } // get the gyroscope bias in rad/s
 	Vector3f getGyroBiasVariance() const { return getStateVariance<State::gyro_bias>(); } // get the gyroscope bias variance in rad/s
 	float getGyroBiasLimit() const { return _params.ekf2_gyr_b_lim; }
+	float getImpactVarianceScale() const { return _impact_variance_scale; }
+	const collision_recovery::ImpactDetector &getImpactDetector() const { return _impact_detector; }
 	float getGyroNoise() const { return _params.ekf2_gyr_noise; }
 
 	// accel bias
@@ -440,6 +443,9 @@ public:
 	friend class AuxGlobalPosition;
 
 private:
+	collision_recovery::ImpactDetector _impact_detector{};
+	float _impact_variance_scale{1.f};
+
 
 	friend class ExternalVisionVel;
 	friend class EvVelBodyFrameFrd;

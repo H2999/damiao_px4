@@ -97,6 +97,8 @@ MulticopterRateControl::parameters_updated()
 				  radians(_param_mc_acro_y_max.get()));
 
 	_output_lpf_yaw.setCutoffFreq(_param_mc_yaw_tq_cutoff.get());
+	_impact_dob.reset();
+	_impact_detector.reset();
 }
 
 void
@@ -132,6 +134,9 @@ MulticopterRateControl::Run()
 		const hrt_abstime now = angular_velocity.timestamp_sample;
 
 		// Guard against too small (< 0.125ms) and too large (> 20ms) dt's.
+		const hrt_abstime wall_now = hrt_absolute_time();
+		const bool timing_valid = _last_run != 0 && now > _last_run && now - _last_run <= 20000
+					  && wall_now >= now && wall_now - now < 50000;
 		const float dt = math::constrain(((now - _last_run) * 1e-6f), 0.000125f, 0.02f);
 		_last_run = now;
 
@@ -182,6 +187,7 @@ MulticopterRateControl::Run()
 			}
 
 		}
+
 		//其他模式
 		else if (_vehicle_rates_setpoint_sub.update(&vehicle_rates_setpoint)) {
 			if (_vehicle_rates_setpoint_sub.copy(&vehicle_rates_setpoint)) {
@@ -191,6 +197,8 @@ MulticopterRateControl::Run()
 				_thrust_setpoint = Vector3f(vehicle_rates_setpoint.thrust_body);
 			}
 		}
+
+		updateImpactDetection(hrt_absolute_time());
 
 		// run the rate controller
 		if (_vehicle_control_mode.flag_control_rates_enabled) {
@@ -210,6 +218,7 @@ MulticopterRateControl::Run()
 			// 如果负方向饱和，就停止负向累加
 			// 这样积分项不会在已经饱和的方向上继续“白费力气”地累加。
 			if (_control_allocator_status_sub.update(&control_allocator_status)) {
+				_impact_allocator = control_allocator_status;
 				Vector<bool, 3> saturation_positive;
 				Vector<bool, 3> saturation_negative;
 
@@ -235,6 +244,8 @@ MulticopterRateControl::Run()
 			// apply low-pass filtering on yaw axis to reduce high frequency torque caused by rotor acceleration
 			//偏航力矩低通滤波
 			torque_setpoint(2) = _output_lpf_yaw.update(torque_setpoint(2), dt);
+
+			applyImpactCompensation(torque_setpoint, angular_accel, rates, dt, timing_valid);
 
 			// publish rate controller status
 			rate_ctrl_status_s rate_ctrl_status{};
@@ -277,12 +288,120 @@ MulticopterRateControl::Run()
 			vehicle_torque_setpoint.timestamp = hrt_absolute_time();
 			_vehicle_torque_setpoint_pub.publish(vehicle_torque_setpoint);
 
+			if (_param_mc_imp_mode.get() > 0) {
+				_impact_dob.setCommand({vehicle_torque_setpoint.xyz[0], vehicle_torque_setpoint.xyz[1], vehicle_torque_setpoint.xyz[2]});
+				publishImpactStatus(angular_velocity.timestamp_sample);
+			}
+
 			updateActuatorControlsStatus(vehicle_torque_setpoint, dt);
 
+		} else {
+			_impact_dob.reset();
+			_impact_detector.reset();
 		}
 	}
 
 	perf_end(_loop_perf);
+}
+
+
+void MulticopterRateControl::updateImpactDetection(hrt_abstime now)
+{
+	if (_param_mc_imp_mode.get() <= 0) {
+		_impact_detector.reset();
+		_impact_dob.reset();
+		_impact_imu_fresh = false;
+		return;
+	}
+
+	const bool updated = _sensor_combined_sub.update(&_impact_imu);
+	const int64_t accel_time = int64_t(_impact_imu.timestamp) + _impact_imu.accelerometer_timestamp_relative;
+	_impact_imu_fresh = _impact_imu.timestamp > 0 && now >= _impact_imu.timestamp
+			    && now - _impact_imu.timestamp < 50000
+			    && _impact_imu.accelerometer_timestamp_relative != sensor_combined_s::RELATIVE_TIMESTAMP_INVALID
+			    && accel_time > 0 && int64_t(now) >= accel_time && int64_t(now) - accel_time < 50000
+			    && Vector3f(_impact_imu.accelerometer_m_s2).isAllFinite()
+			    && Vector3f(_impact_imu.gyro_rad).isAllFinite();
+	const bool airborne = _vehicle_control_mode.flag_armed && !_landed && !_maybe_landed
+			      && _vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+			      && !_vehicle_status.is_vtol;
+
+	if (!airborne) {
+		_impact_detector.reset();
+		_impact_dob.reset();
+
+	} else if (updated && _impact_imu_fresh) {
+		_impact_detector.update(_impact_imu.timestamp, Vector3f(_impact_imu.accelerometer_m_s2).norm(),
+					Vector3f(_impact_imu.gyro_rad).norm(),
+					_impact_imu.accelerometer_clipping || _impact_imu.gyro_clipping, true,
+					_param_mc_imp_acc.get(), _param_mc_imp_rate.get());
+	}
+}
+
+void MulticopterRateControl::applyImpactCompensation(Vector3f &torque, const Vector3f &angular_accel,
+		const Vector3f &rates, float dt, bool timing_valid)
+{
+	if (_param_mc_imp_mode.get() <= 0) { return; }
+
+	const hrt_abstime now = hrt_absolute_time();
+	const auto state = _impact_detector.stateAt(now);
+	const bool allocator_ok = _impact_allocator.timestamp > 0 && now >= _impact_allocator.timestamp
+				  && now - _impact_allocator.timestamp < 100000
+				  && _impact_allocator.torque_setpoint_achieved && _impact_allocator.thrust_setpoint_achieved
+				  && _impact_allocator.handled_motor_failure_mask == 0 && _impact_allocator.motor_stop_mask == 0;
+	const bool gyro_ok = _impact_imu_fresh && !_impact_imu.gyro_clipping && !_impact_imu.accelerometer_clipping
+			     && rates.isAllFinite() && angular_accel.isAllFinite()
+			     && rates.norm() < _param_mc_imp_rate.get();
+	const bool usable = timing_valid && gyro_ok && allocator_ok && _vehicle_control_mode.flag_armed
+			    && !_landed && !_maybe_landed && !_vehicle_status.is_vtol
+			    && _vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+			    && state != collision_recovery::ImpactDetector::State::Shock;
+	// Do not override pilot modes. This prototype only augments Offboard rate control.
+	const bool compensate = _param_mc_imp_mode.get() == 2 && usable
+				&& _vehicle_control_mode.flag_control_offboard_enabled
+				&& state == collision_recovery::ImpactDetector::State::Recovery;
+	const auto correction = _impact_dob.update({angular_accel(0), angular_accel(1), angular_accel(2)},
+	{_param_mc_dob_b_r.get(), _param_mc_dob_b_p.get(), _param_mc_dob_b_y.get()}, dt,
+	_param_mc_dob_bw.get(), _param_mc_dob_tau.get(), _param_mc_dob_lim.get(),
+	_param_mc_dob_slew.get(), usable, compensate);
+
+	_impact_status.compensation_active = false;
+
+	for (unsigned i = 0; i < 3; ++i) {
+		float applied = 0.f;
+
+		if (_param_mc_imp_mode.get() == 2 && usable && _vehicle_control_mode.flag_control_offboard_enabled
+		    && fabsf(correction[i]) > FLT_EPSILON && PX4_ISFINITE(torque(i))) {
+			const float nominal = torque(i);
+			// Preserve nominal demand outside [-1,1]; only use available authority for compensation.
+			applied = collision_recovery::RateDisturbanceObserver::boundedCorrection(nominal, correction[i]);
+			torque(i) += applied;
+		}
+
+		_impact_status.disturbance[i] = _impact_dob.disturbance()[i];
+		_impact_status.correction[i] = applied;
+		_impact_status.compensation_active |= fabsf(applied) > FLT_EPSILON;
+	}
+
+	_impact_status.allocator_ok = allocator_ok;
+}
+
+void MulticopterRateControl::publishImpactStatus(hrt_abstime sample_time)
+{
+	const hrt_abstime now = hrt_absolute_time();
+
+	if (now - _last_impact_status < 20000) { return; }
+
+	_impact_status.timestamp = now;
+	_impact_status.timestamp_sample = sample_time;
+	_impact_status.event_count = _impact_detector.events();
+	_impact_status.state = static_cast<uint8_t>(_impact_detector.stateAt(now));
+	_impact_status.mode = _param_mc_imp_mode.get();
+	_impact_status.imu_fresh = _impact_imu_fresh;
+	_impact_status.force_norm = Vector3f(_impact_imu.accelerometer_m_s2).norm();
+	_impact_status.rate_norm = Vector3f(_impact_imu.gyro_rad).norm();
+	_impact_status_pub.publish(_impact_status);
+	_last_impact_status = now;
 }
 
 void MulticopterRateControl::updateActuatorControlsStatus(const vehicle_torque_setpoint_s &vehicle_torque_setpoint,

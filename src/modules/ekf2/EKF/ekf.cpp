@@ -130,6 +130,8 @@ void Ekf::reset()
 	}
 
 	_zero_velocity_update.reset();
+	_impact_detector.reset();
+	_impact_variance_scale = 1.f;
 
 	updateParameters();
 }

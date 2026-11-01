@@ -113,6 +113,38 @@ parameters:
       default: 7
       min: 0
       max: 7
+    EKF2_IMP_EN:
+      description:
+        short: Experimental impact process noise adaptation
+        long: Inflates nominal IMU noise variances during airborne impact windows.
+          Does not reconstruct clipped samples or reset state estimates.
+      type: boolean
+      default: 0
+    EKF2_IMP_ACC:
+      description:
+        short: Impact specific force norm threshold
+      type: float
+      default: 35.0
+      min: 15.0
+      max: 200.0
+      unit: m/s^2
+    EKF2_IMP_RATE:
+      description:
+        short: Impact angular rate norm threshold
+      type: float
+      default: 30.0
+      min: 5.0
+      max: 100.0
+      unit: rad/s
+    EKF2_IMP_QMAX:
+      description:
+        short: Impact nominal IMU noise variance multiplier
+        long: Maximum variance multiplier for 80 ms after the last trigger,
+          then linearly reduced to one over 500 ms. Existing bad-accel noise is retained.
+      type: float
+      default: 25.0
+      min: 1.0
+      max: 100.0
     EKF2_GYR_NOISE:
       description:
         short: Rate gyro noise for covariance prediction

@@ -55,6 +55,8 @@ set(msg_files
 	CanInterfaceStatus.msg
 	CellularStatus.msg
 	CollisionConstraints.msg
+	ImpactRecoveryStatus.msg
+	EstimatorImpactStatus.msg
 	ControlAllocatorStatus.msg
 	Cpuload.msg
 	DatamanRequest.msg

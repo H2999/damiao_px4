@@ -22,6 +22,10 @@ bool ImuDownSampler::update(const imuSample &imu_sample_new)
 	_imu_down_sampled.delta_vel_clipping[1] |= imu_sample_new.delta_vel_clipping[1];
 	_imu_down_sampled.delta_vel_clipping[2] |= imu_sample_new.delta_vel_clipping[2];
 
+	for (unsigned i = 0; i < 3; ++i) {
+		_imu_down_sampled.delta_ang_clipping[i] |= imu_sample_new.delta_ang_clipping[i];
+	}
+
 	// use a quaternion to accumulate delta angle data
 	// this quaternion represents the rotation from the start to end of the accumulation period
 	const Quatf delta_q(AxisAnglef(imu_sample_new.delta_ang));

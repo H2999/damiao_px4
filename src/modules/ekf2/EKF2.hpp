@@ -60,6 +60,7 @@
 #include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
 #include <px4_platform_common/time.h>
 #include <uORB/Publication.hpp>
+#include <uORB/topics/estimator_impact_status.h>
 #include <uORB/PublicationMulti.hpp>
 #include <uORB/Subscription.hpp>
 #include <uORB/SubscriptionCallback.hpp>
@@ -479,6 +480,8 @@ private:
 	uORB::PublicationMulti<estimator_aid_source3d_s> _estimator_aid_src_gravity_pub{ORB_ID(estimator_aid_src_gravity)};
 #endif // CONFIG_EKF2_GRAVITY_FUSION
 
+	uORB::PublicationMulti<estimator_impact_status_s> _impact_status_pub{ORB_ID(estimator_impact_status)};
+	hrt_abstime _last_impact_status{0};
 	Ekf _ekf;
 
 	parameters *_params;	///< pointer to ekf parameter struct (located in _ekf class instance)
@@ -494,6 +497,11 @@ private:
 		(ParamExtFloat<px4::params::EKF2_AVEL_DELAY>)
 		_param_ekf2_avel_delay,	///< auxiliary velocity measurement delay relative to the IMU (mSec)
 #endif // CONFIG_EKF2_AUXVEL
+
+		(ParamExtInt<px4::params::EKF2_IMP_EN>) _param_ekf2_imp_en,
+		(ParamExtFloat<px4::params::EKF2_IMP_ACC>) _param_ekf2_imp_acc,
+		(ParamExtFloat<px4::params::EKF2_IMP_RATE>) _param_ekf2_imp_rate,
+		(ParamExtFloat<px4::params::EKF2_IMP_QMAX>) _param_ekf2_imp_qmax,
 
 		(ParamExtFloat<px4::params::EKF2_GYR_NOISE>)
 		_param_ekf2_gyr_noise,	///< IMU angular rate noise used for covariance prediction (rad/sec)

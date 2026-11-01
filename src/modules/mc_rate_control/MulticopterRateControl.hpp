@@ -34,6 +34,10 @@
 #pragma once
 
 #include <lib/rate_control/rate_control.hpp>
+#include <lib/collision_recovery/ImpactDetector.hpp>
+#include <lib/collision_recovery/RateDisturbanceObserver.hpp>
+#include <uORB/topics/sensor_combined.h>
+#include <uORB/topics/impact_recovery_status.h>
 #include <lib/mathlib/math/filter/AlphaFilter.hpp>
 #include <lib/matrix/matrix/math.hpp>
 #include <lib/perf/perf_counter.h>
@@ -89,6 +93,21 @@ private:
 	void parameters_updated();
 	//根据当前计算出的力矩设定点，更新执行器控制状态，用于监控和记录控制器的输出情况
 	void updateActuatorControlsStatus(const vehicle_torque_setpoint_s &vehicle_torque_setpoint, float dt);
+
+	void updateImpactDetection(hrt_abstime now);
+	void applyImpactCompensation(matrix::Vector3f &torque, const matrix::Vector3f &angular_accel,
+				     const matrix::Vector3f &rates, float dt, bool timing_valid);
+	void publishImpactStatus(hrt_abstime sample_time);
+
+	collision_recovery::ImpactDetector _impact_detector{};
+	collision_recovery::RateDisturbanceObserver _impact_dob{};
+	uORB::Subscription _sensor_combined_sub{ORB_ID(sensor_combined)};
+	uORB::Publication<impact_recovery_status_s> _impact_status_pub{ORB_ID(impact_recovery_status)};
+	sensor_combined_s _impact_imu{};
+	control_allocator_status_s _impact_allocator{};
+	impact_recovery_status_s _impact_status{};
+	hrt_abstime _last_impact_status{0};
+	bool _impact_imu_fresh{false};
 
 	RateControl _rate_control; ///< class for rate control calculations
 
@@ -163,6 +182,16 @@ private:
 		(ParamFloat<px4::params::MC_ACRO_SUPEXPO>) _param_mc_acro_supexpo,		/**< superexpo stick curve shape (roll & pitch) */
 		(ParamFloat<px4::params::MC_ACRO_SUPEXPOY>) _param_mc_acro_supexpoy,		/**< superexpo stick curve shape (yaw) */
 
+		(ParamInt<px4::params::MC_IMP_MODE>) _param_mc_imp_mode,
+		(ParamFloat<px4::params::MC_IMP_ACC>) _param_mc_imp_acc,
+		(ParamFloat<px4::params::MC_IMP_RATE>) _param_mc_imp_rate,
+		(ParamFloat<px4::params::MC_DOB_B_R>) _param_mc_dob_b_r,
+		(ParamFloat<px4::params::MC_DOB_B_P>) _param_mc_dob_b_p,
+		(ParamFloat<px4::params::MC_DOB_B_Y>) _param_mc_dob_b_y,
+		(ParamFloat<px4::params::MC_DOB_BW>) _param_mc_dob_bw,
+		(ParamFloat<px4::params::MC_DOB_TAU>) _param_mc_dob_tau,
+		(ParamFloat<px4::params::MC_DOB_LIM>) _param_mc_dob_lim,
+		(ParamFloat<px4::params::MC_DOB_SLEW>) _param_mc_dob_slew,
 		(ParamBool<px4::params::MC_BAT_SCALE_EN>) _param_mc_bat_scale_en
 	)
 };

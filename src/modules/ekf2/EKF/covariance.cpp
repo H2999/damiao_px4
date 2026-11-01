@@ -115,9 +115,25 @@ void Ekf::predictCovariance(const imuSample &imu_delayed)
 	// predict the covariance
 	const float dt = 0.5f * (imu_delayed.delta_vel_dt + imu_delayed.delta_ang_dt);
 
+	// Work in the same delayed IMU time domain as covariance prediction.
+	bool clipped = false;
+
+	for (unsigned i = 0; i < 3; ++i) {
+		clipped |= imu_delayed.delta_ang_clipping[i] || imu_delayed.delta_vel_clipping[i];
+	}
+
+	_impact_detector.update(imu_delayed.time_us,
+				imu_delayed.delta_vel.norm() / imu_delayed.delta_vel_dt,
+				imu_delayed.delta_ang.norm() / imu_delayed.delta_ang_dt, clipped,
+				_params.ekf2_imp_en != 0 && _control_status.flags.in_air,
+				_params.ekf2_imp_acc, _params.ekf2_imp_rate);
+	_impact_variance_scale = _impact_detector.varianceScale(imu_delayed.time_us, _params.ekf2_imp_qmax);
+
+	// Scale variances, not the mean propagation or the configured noise parameters.
+	// Keep existing bad-accelerometer inflation as a lower bound.
 	// gyro noise variance
 	float gyro_noise = _params.ekf2_gyr_noise;
-	const float gyro_var = sq(gyro_noise);
+	const float gyro_var = sq(gyro_noise) * _impact_variance_scale;
 
 	// accel noise variance
 	float accel_noise = _params.ekf2_acc_noise;
@@ -126,10 +142,10 @@ void Ekf::predictCovariance(const imuSample &imu_delayed)
 	for (unsigned i = 0; i < 3; i++) {
 		if (_fault_status.flags.bad_acc_vertical || imu_delayed.delta_vel_clipping[i]) {
 			// Increase accelerometer process noise if bad accel data is detected
-			accel_var(i) = sq(BADACC_BIAS_PNOISE);
+			accel_var(i) = fmaxf(sq(BADACC_BIAS_PNOISE), sq(accel_noise) * _impact_variance_scale);
 
 		} else {
-			accel_var(i) = sq(accel_noise);
+			accel_var(i) = sq(accel_noise) * _impact_variance_scale;
 		}
 	}
 

@@ -305,3 +305,124 @@ PARAM_DEFINE_INT32(MC_BAT_SCALE_EN, 0);
  * @group Multicopter Rate Control
  */
 PARAM_DEFINE_FLOAT(MC_YAW_TQ_CUTOFF, 2.f);
+
+/**
+ * Experimental impact observer mode
+ *
+ * 0 disables all observer changes. 1 monitors without changing control. 2 permits bounded DOB compensation in airborne multicopter Offboard recovery windows. Does not provide attitude recovery or estimator handback.
+ *
+ * @value 0 Disabled
+ * @value 1 Monitor only
+ * @value 2 Experimental compensation
+ * @min 0
+ * @max 2
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_INT32(MC_IMP_MODE, 0);
+
+/**
+ * Impact specific force norm threshold
+ *
+ * Includes gravity support. Tune from logged specific force; not a validated threshold for any airframe.
+ *
+ * @unit m/s^2
+ * @min 15
+ * @max 200
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_IMP_ACC, 35.f);
+
+/**
+ * Impact angular rate norm threshold
+ *
+ * Clipping flags also trigger the event independently of this threshold.
+ *
+ * @unit rad/s
+ * @min 5
+ * @max 100
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_IMP_RATE, 30.f);
+
+/**
+ * Roll normalized torque effectiveness
+ *
+ * Identified angular acceleration per unit normalized torque. Zero disables this observer axis. Not a moment of inertia.
+ *
+ * @unit rad/s^2
+ * @min 0
+ * @max 10000
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_DOB_B_R, 0.f);
+
+/**
+ * Pitch normalized torque effectiveness
+ *
+ * Identified angular acceleration per unit normalized torque. Zero disables this observer axis. Not a moment of inertia.
+ *
+ * @unit rad/s^2
+ * @min 0
+ * @max 10000
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_DOB_B_P, 0.f);
+
+/**
+ * Yaw normalized torque effectiveness
+ *
+ * Identified angular acceleration per unit normalized torque. Zero disables this observer axis. Not a moment of inertia.
+ *
+ * @unit rad/s^2
+ * @min 0
+ * @max 10000
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_DOB_B_Y, 0.f);
+
+/**
+ * Impact disturbance observer bandwidth
+ *
+ * Must account for filtered angular acceleration latency and motor response.
+ *
+ * @unit Hz
+ * @min 0.1
+ * @max 30
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_DOB_BW, 5.f);
+
+/**
+ * Nominal torque response time constant
+ *
+ * First order actuator model. Identify on the actual airframe before compensation.
+ *
+ * @unit s
+ * @min 0.001
+ * @max 0.3
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_DOB_TAU, 0.04f);
+
+/**
+ * Maximum impact torque correction
+ *
+ * Absolute limit per normalized torque axis.
+ *
+ * @min 0
+ * @max 0.3
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_DOB_LIM, 0.1f);
+
+/**
+ * Maximum impact correction slew rate
+ *
+ * Normalized torque change per second. Invalid measurements inhibit compensation immediately.
+ *
+ * @unit 1/s
+ * @min 0.01
+ * @max 10
+ * @group Collision Recovery
+ */
+PARAM_DEFINE_FLOAT(MC_DOB_SLEW, 0.5f);
