@@ -13,7 +13,7 @@ namespace collision_recovery
 class ImpactDetector
 {
 public:
-
+	// 正常 碰撞 恢复
 	enum class State : uint8_t { Idle = 0, Shock = 1, Recovery = 2 };
 
 	void reset() { _last_sample = 0; _last_impact = 0; _events = 0; _state = State::Idle; }
